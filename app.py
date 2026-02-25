@@ -1,7 +1,6 @@
 import streamlit as st
 import sqlite3
 import bcrypt
-import os
 from pypdf import PdfReader
 from docx import Document
 import openpyxl
@@ -20,6 +19,14 @@ def inicializar_banco():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
         senha_hash TEXT
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS documentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT,
+        arquivo BLOB
     )
     """)
 
@@ -88,9 +95,14 @@ def extrair_texto(arquivo):
     return ""
 
 
-def indexar_documento(nome, conteudo):
+def salvar_documento(nome, conteudo, arquivo_bytes):
     conn = sqlite3.connect("documentos.db")
     cursor = conn.cursor()
+
+    cursor.execute(
+        "INSERT INTO documentos (nome, arquivo) VALUES (?, ?)",
+        (nome, arquivo_bytes),
+    )
 
     cursor.execute(
         "INSERT INTO documentos_fts (nome, conteudo) VALUES (?, ?)",
@@ -138,10 +150,10 @@ else:
         with st.spinner("Processando e indexando..."):
             texto = extrair_texto(arquivo)
             if texto.strip():
-                indexar_documento(arquivo.name, texto)
-                st.success("Documento indexado com sucesso!")
+                salvar_documento(arquivo.name, texto, arquivo.getvalue())
+                st.success("Documento salvo e indexado com sucesso!")
             else:
-                st.warning("Não foi possível extrair texto do arquivo.")
+                st.warning("Não foi possível extrair texto.")
 
     # =========================
     # BUSCA
@@ -154,17 +166,26 @@ else:
         conn = sqlite3.connect("documentos.db")
         cursor = conn.cursor()
 
-        cursor.execute(
-            "SELECT nome FROM documentos_fts WHERE documentos_fts MATCH ?",
-            (busca,),
-        )
+        cursor.execute("""
+            SELECT d.id, d.nome, d.arquivo
+            FROM documentos d
+            JOIN documentos_fts f ON d.nome = f.nome
+            WHERE documentos_fts MATCH ?
+        """, (busca,))
 
         resultados = cursor.fetchall()
         conn.close()
 
         if resultados:
-            for doc in resultados:
-                st.write("📄", doc[0])
+            for doc_id, nome, arquivo_blob in resultados:
+                st.write("📄", nome)
+
+                st.download_button(
+                    label="⬇️ Baixar",
+                    data=arquivo_blob,
+                    file_name=nome,
+                    key=doc_id
+                )
         else:
             st.warning("Nenhum resultado encontrado.")
 
