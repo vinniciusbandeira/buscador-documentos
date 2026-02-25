@@ -177,14 +177,14 @@ else:
         conn.close()
 
         if resultados:
-            for doc_id, nome, arquivo_blob in resultados:
+             for i, (doc_id, nome, arquivo_blob) in enumerate (resultados):
                 st.write("📄", nome)
 
                 st.download_button(
                     label="⬇️ Baixar",
                     data=arquivo_blob,
                     file_name=nome,
-                    key=f"download_{doc_id}_{nome}"
+                    key=f"download_{doc_id}_{nome}_{i}"
                 )
         else:
             st.warning("Nenhum resultado encontrado.")
@@ -192,3 +192,4 @@ else:
     if st.button("Logout"):
         st.session_state.logado = False
         st.rerun()
+
