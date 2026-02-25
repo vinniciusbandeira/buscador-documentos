@@ -181,17 +181,22 @@ else:
 
         if resultados:
             for i, (doc_id, nome, arquivo_blob) in enumerate(resultados):
-                st.write("📄", nome)
 
-                st.download_button(
-                    label="⬇️ Baixar",
-                    data=arquivo_blob,
-                    file_name=nome,
-                    key=f"download_{doc_id}_{i}"
-                )
+    # Converte memoryview para bytes
+    arquivo_bytes = bytes(arquivo_blob)
+
+    st.write("📄", nome)
+
+    st.download_button(
+        label="⬇️ Baixar",
+        data=arquivo_bytes,
+        file_name=nome,
+        key=f"download_{doc_id}_{i}"
+    )
         else:
             st.warning("Nenhum resultado encontrado.")
 
     if st.button("Logout"):
         st.session_state.logado = False
         st.rerun()
+
