@@ -1,0 +1,6 @@
+streamlit
+sqlalchemy
+bcrypt
+pypdf
+python-docx
+openpyxl
