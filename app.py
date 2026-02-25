@@ -1,6 +1,7 @@
 import streamlit as st
-import sqlite3
+import os
 import bcrypt
+from sqlalchemy import create_engine, text
 from pypdf import PdfReader
 from docx import Document
 import openpyxl
@@ -8,64 +9,72 @@ import openpyxl
 st.set_page_config(page_title="Buscador de Documentos", layout="wide")
 
 # =========================
-# BANCO
+# CONEXÃO POSTGRESQL
+# =========================
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+engine = create_engine(DATABASE_URL)
+
+# =========================
+# INICIALIZA BANCO
 # =========================
 def inicializar_banco():
-    conn = sqlite3.connect("documentos.db")
-    cursor = conn.cursor()
+    with engine.begin() as conn:
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        senha_hash TEXT
-    )
-    """)
+        conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            senha_hash TEXT NOT NULL
+        );
+        """))
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS documentos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT,
-        arquivo BLOB
-    )
-    """)
+        conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS documentos (
+            id SERIAL PRIMARY KEY,
+            nome TEXT,
+            conteudo TEXT,
+            arquivo BYTEA
+        );
+        """))
 
-    cursor.execute("""
-    CREATE VIRTUAL TABLE IF NOT EXISTS documentos_fts
-    USING fts5(nome, conteudo)
-    """)
+        # cria usuário admin se não existir
+        result = conn.execute(text(
+            "SELECT * FROM usuarios WHERE username = 'admin';"
+        ))
 
-    cursor.execute("SELECT * FROM usuarios WHERE username = ?", ("admin",))
-    if not cursor.fetchone():
-        senha_hash = bcrypt.hashpw("admin123".encode(), bcrypt.gensalt()).decode()
-        cursor.execute(
-            "INSERT INTO usuarios (username, senha_hash) VALUES (?, ?)",
-            ("admin", senha_hash),
-        )
+        if result.fetchone() is None:
+            senha_hash = bcrypt.hashpw(
+                "admin123".encode(),
+                bcrypt.gensalt()
+            ).decode()
 
-    conn.commit()
-    conn.close()
+            conn.execute(text("""
+                INSERT INTO usuarios (username, senha_hash)
+                VALUES (:username, :senha_hash);
+            """), {"username": "admin", "senha_hash": senha_hash})
 
 
 inicializar_banco()
 
-
 # =========================
-# FUNÇÕES
+# LOGIN
 # =========================
 def verificar_login(username, senha):
-    conn = sqlite3.connect("documentos.db")
-    cursor = conn.cursor()
+    with engine.begin() as conn:
+        result = conn.execute(
+            text("SELECT senha_hash FROM usuarios WHERE username = :u"),
+            {"u": username}
+        ).fetchone()
 
-    cursor.execute("SELECT senha_hash FROM usuarios WHERE username = ?", (username,))
-    resultado = cursor.fetchone()
-    conn.close()
-
-    if resultado:
-        return bcrypt.checkpw(senha.encode(), resultado[0].encode())
+    if result:
+        return bcrypt.checkpw(senha.encode(), result[0].encode())
     return False
 
 
+# =========================
+# EXTRAIR TEXTO
+# =========================
 def extrair_texto(arquivo):
     nome = arquivo.name
     extensao = nome.split(".")[-1].lower()
@@ -86,7 +95,9 @@ def extrair_texto(arquivo):
         texto = ""
         for sheet in wb:
             for row in sheet.iter_rows(values_only=True):
-                texto += " ".join([str(cell) for cell in row if cell]) + "\n"
+                texto += " ".join(
+                    [str(cell) for cell in row if cell]
+                ) + "\n"
         return texto
 
     elif extensao == "txt":
@@ -95,26 +106,23 @@ def extrair_texto(arquivo):
     return ""
 
 
+# =========================
+# SALVAR DOCUMENTO
+# =========================
 def salvar_documento(nome, conteudo, arquivo_bytes):
-    conn = sqlite3.connect("documentos.db")
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "INSERT INTO documentos (nome, arquivo) VALUES (?, ?)",
-        (nome, arquivo_bytes),
-    )
-
-    cursor.execute(
-        "INSERT INTO documentos_fts (nome, conteudo) VALUES (?, ?)",
-        (nome, conteudo),
-    )
-
-    conn.commit()
-    conn.close()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO documentos (nome, conteudo, arquivo)
+            VALUES (:nome, :conteudo, :arquivo)
+        """), {
+            "nome": nome,
+            "conteudo": conteudo,
+            "arquivo": arquivo_bytes
+        })
 
 
 # =========================
-# LOGIN
+# INTERFACE
 # =========================
 if "logado" not in st.session_state:
     st.session_state.logado = False
@@ -136,9 +144,7 @@ if not st.session_state.logado:
 else:
     st.title("📂 Buscador de Documentos")
 
-    # =========================
     # UPLOAD
-    # =========================
     st.subheader("📤 Upload de Documento")
 
     arquivo = st.file_uploader(
@@ -147,44 +153,41 @@ else:
     )
 
     if arquivo:
-        with st.spinner("Processando e indexando..."):
+        with st.spinner("Processando..."):
             texto = extrair_texto(arquivo)
+
             if texto.strip():
-                salvar_documento(arquivo.name, texto, arquivo.getvalue())
-                st.success("Documento salvo e indexado com sucesso!")
+                salvar_documento(
+                    arquivo.name,
+                    texto,
+                    arquivo.getvalue()
+                )
+                st.success("Documento salvo com sucesso!")
             else:
                 st.warning("Não foi possível extrair texto.")
 
-    # =========================
     # BUSCA
-    # =========================
     st.subheader("🔎 Buscar Documento")
 
     busca = st.text_input("Digite o termo")
 
     if busca:
-        conn = sqlite3.connect("documentos.db")
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT d.id, d.nome, d.arquivo
-            FROM documentos d
-            JOIN documentos_fts f ON d.nome = f.nome
-            WHERE documentos_fts MATCH ?
-        """, (busca,))
-
-        resultados = cursor.fetchall()
-        conn.close()
+        with engine.begin() as conn:
+            resultados = conn.execute(text("""
+                SELECT id, nome, arquivo
+                FROM documentos
+                WHERE conteudo ILIKE :busca
+            """), {"busca": f"%{busca}%"}).fetchall()
 
         if resultados:
-             for i, (doc_id, nome, arquivo_blob) in enumerate (resultados):
+            for i, (doc_id, nome, arquivo_blob) in enumerate(resultados):
                 st.write("📄", nome)
 
                 st.download_button(
                     label="⬇️ Baixar",
                     data=arquivo_blob,
                     file_name=nome,
-                    key=f"download_{doc_id}_{nome}_{i}"
+                    key=f"download_{doc_id}_{i}"
                 )
         else:
             st.warning("Nenhum resultado encontrado.")
@@ -192,4 +195,3 @@ else:
     if st.button("Logout"):
         st.session_state.logado = False
         st.rerun()
-
