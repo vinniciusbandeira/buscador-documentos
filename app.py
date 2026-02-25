@@ -183,7 +183,7 @@ else:
         for i, (doc_id, nome, arquivo_blob) in enumerate(resultados):
 
     # Converte memoryview para bytes
-    arquivo_bytes = bytes(arquivo_blob)
+        arquivo_bytes = bytes(arquivo_blob)
 
     st.write("📄", nome)
 
@@ -199,6 +199,7 @@ else:
     if st.button("Logout"):
         st.session_state.logado = False
         st.rerun()
+
 
 
 
