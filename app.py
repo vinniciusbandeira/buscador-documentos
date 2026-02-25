@@ -184,7 +184,7 @@ else:
                     label="⬇️ Baixar",
                     data=arquivo_blob,
                     file_name=nome,
-                    key=doc_id
+                    key=f"download_{doc_id}_{nome}"
                 )
         else:
             st.warning("Nenhum resultado encontrado.")
