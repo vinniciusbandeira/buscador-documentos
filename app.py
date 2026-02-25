@@ -179,7 +179,7 @@ else:
                 WHERE conteudo ILIKE :busca
             """), {"busca": f"%{busca}%"}).fetchall()
 
-        if resultados:
+    if resultados:
             for i, (doc_id, nome, arquivo_blob) in enumerate(resultados):
 
     # Converte memoryview para bytes
@@ -199,4 +199,5 @@ else:
     if st.button("Logout"):
         st.session_state.logado = False
         st.rerun()
+
 
