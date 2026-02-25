@@ -1,38 +1,76 @@
 import streamlit as st
 import sqlite3
 import bcrypt
-import os
-from sqlalchemy import create_engine, text
 
 # =========================
-# CONFIGURAÇÃO DO BANCO
+# CONFIG
 # =========================
-DB_PATH = "documentos.db"
-engine = create_engine(f"sqlite:///{DB_PATH}")
+st.set_page_config(page_title="Buscador de Documentos", layout="wide")
 
 # =========================
-# FUNÇÃO DE LOGIN
+# INICIALIZAÇÃO DO BANCO
 # =========================
-def verificar_login(username, senha):
-    conn = sqlite3.connect(DB_PATH)
+def inicializar_banco():
+    conn = sqlite3.connect("documentos.db")
     cursor = conn.cursor()
 
-    cursor.execute("SELECT senha_hash FROM usuarios WHERE username = ?", (username,))
+    # Criar tabela usuarios
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        senha_hash TEXT
+    )
+    """)
+
+    # Criar tabela documentos (FTS5)
+    cursor.execute("""
+    CREATE VIRTUAL TABLE IF NOT EXISTS documentos_fts
+    USING fts5(nome, conteudo)
+    """)
+
+    # Criar admin se não existir
+    cursor.execute("SELECT * FROM usuarios WHERE username = ?", ("admin",))
+    if not cursor.fetchone():
+        senha_hash = bcrypt.hashpw("admin123".encode(), bcrypt.gensalt()).decode()
+        cursor.execute(
+            "INSERT INTO usuarios (username, senha_hash) VALUES (?, ?)",
+            ("admin", senha_hash),
+        )
+
+    conn.commit()
+    conn.close()
+
+
+inicializar_banco()
+
+# =========================
+# FUNÇÕES
+# =========================
+def verificar_login(username, senha):
+    conn = sqlite3.connect("documentos.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT senha_hash FROM usuarios WHERE username = ?", (username,)
+    )
     resultado = cursor.fetchone()
     conn.close()
 
     if resultado:
-        return bcrypt.checkpw(senha.encode(), resultado[0])
+        return bcrypt.checkpw(senha.encode(), resultado[0].encode())
+
     return False
 
 
 # =========================
-# CONTROLE DE SESSÃO
+# LOGIN
 # =========================
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
+
     st.title("🔐 Login")
 
     username = st.text_input("Usuário")
@@ -44,51 +82,35 @@ if not st.session_state.logado:
             st.success("Login realizado com sucesso!")
             st.rerun()
         else:
-            st.error("Usuário ou senha incorretos.")
+            st.error("Usuário ou senha inválidos.")
 
-    st.stop()  # 🚨 impede o resto do app de rodar
+else:
+    # =========================
+    # SISTEMA PRINCIPAL
+    # =========================
+    st.title("📂 Buscador de Documentos")
 
+    busca = st.text_input("Digite o termo para busca")
 
-# =========================
-# SISTEMA PRINCIPAL (SÓ APÓS LOGIN)
-# =========================
+    if busca:
+        conn = sqlite3.connect("documentos.db")
+        cursor = conn.cursor()
 
-st.title("📂 Buscador de Documentos")
+        cursor.execute(
+            "SELECT nome FROM documentos_fts WHERE documentos_fts MATCH ?",
+            (busca,),
+        )
 
-palavra = st.text_input("Digite a palavra para buscar:")
-
-if palavra:
-    with engine.connect() as conn:
-        resultados = conn.execute(text("""
-            SELECT nome, caminho
-            FROM documentos_fts
-            WHERE conteudo LIKE :palavra
-        """), {"palavra": f"%{palavra}%"}).fetchall()
+        resultados = cursor.fetchall()
+        conn.close()
 
         if resultados:
-            st.write("Resultados encontrados:")
-
-            for nome, caminho in resultados:
-                st.markdown(f"### 📄 {nome}")
-
-                try:
-                    with open(caminho, "rb") as f:
-                        st.download_button(
-                            label="⬇ Baixar arquivo",
-                            data=f,
-                            file_name=nome,
-                            key=caminho
-                        )
-                except:
-                    st.warning("Arquivo não encontrado.")
-
+            st.subheader("Resultados encontrados:")
+            for doc in resultados:
+                st.write("📄", doc[0])
         else:
-            st.write("Nenhum documento encontrado.")
+            st.warning("Nenhum resultado encontrado.")
 
-
-# =========================
-# BOTÃO DE LOGOUT
-# =========================
-if st.button("🚪 Sair"):
-    st.session_state.logado = False
-    st.rerun()
+    if st.button("Logout"):
+        st.session_state.logado = False
+        st.rerun()
