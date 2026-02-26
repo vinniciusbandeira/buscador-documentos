@@ -13,6 +13,10 @@ st.set_page_config(page_title="Buscador de Documentos", layout="wide")
 # =========================
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+if not DATABASE_URL:
+    st.error("DATABASE_URL não configurada.")
+    st.stop()
+
 engine = create_engine(DATABASE_URL)
 
 # =========================
@@ -38,9 +42,9 @@ def inicializar_banco():
         );
         """))
 
-        # cria usuário admin se não existir
+        # cria admin se não existir
         result = conn.execute(text(
-            "SELECT * FROM usuarios WHERE username = 'admin';"
+            "SELECT id FROM usuarios WHERE username = 'admin';"
         ))
 
         if result.fetchone() is None:
@@ -52,7 +56,10 @@ def inicializar_banco():
             conn.execute(text("""
                 INSERT INTO usuarios (username, senha_hash)
                 VALUES (:username, :senha_hash);
-            """), {"username": "admin", "senha_hash": senha_hash})
+            """), {
+                "username": "admin",
+                "senha_hash": senha_hash
+            })
 
 
 inicializar_banco()
@@ -73,7 +80,7 @@ def verificar_login(username, senha):
 
 
 # =========================
-# EXTRAIR TEXTO
+# EXTRAÇÃO DE TEXTO
 # =========================
 def extrair_texto(arquivo):
     nome = arquivo.name
@@ -144,7 +151,9 @@ if not st.session_state.logado:
 else:
     st.title("📂 Buscador de Documentos")
 
+    # =========================
     # UPLOAD
+    # =========================
     st.subheader("📤 Upload de Documento")
 
     arquivo = st.file_uploader(
@@ -166,7 +175,9 @@ else:
             else:
                 st.warning("Não foi possível extrair texto.")
 
+    # =========================
     # BUSCA
+    # =========================
     st.subheader("🔎 Buscar Documento")
 
     busca = st.text_input("Digite o termo")
@@ -177,29 +188,27 @@ else:
                 SELECT id, nome, arquivo
                 FROM documentos
                 WHERE conteudo ILIKE :busca
-            """), {"busca": f"%{busca}%"}).fetchall()
+            """), {
+                "busca": f"%{busca}%"
+            }).fetchall()
 
-    if resultados:
-        for i, (doc_id, nome, arquivo_blob) in enumerate(resultados):
+        if resultados:
+            for i, (doc_id, nome, arquivo_blob) in enumerate(resultados):
 
-    # Converte memoryview para bytes
-        arquivo_bytes = bytes(arquivo_blob)
+                # Converte memoryview (BYTEA) para bytes
+                arquivo_bytes = bytes(arquivo_blob)
 
-    st.write("📄", nome)
+                st.write("📄", nome)
 
-    st.download_button(
-        label="⬇️ Baixar",
-        data=arquivo_bytes,
-        file_name=nome,
-        key=f"download_{doc_id}_{i}"
-    )
+                st.download_button(
+                    label="⬇️ Baixar",
+                    data=arquivo_bytes,
+                    file_name=nome,
+                    key=f"download_{doc_id}_{i}"
+                )
         else:
             st.warning("Nenhum resultado encontrado.")
 
     if st.button("Logout"):
         st.session_state.logado = False
         st.rerun()
-
-
-
-
