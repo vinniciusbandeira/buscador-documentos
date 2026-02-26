@@ -1,6 +1,8 @@
 import streamlit as st
 import os
 import bcrypt
+import zipfile
+import io
 from sqlalchemy import create_engine, text
 from pypdf import PdfReader
 from docx import Document
@@ -42,7 +44,6 @@ def inicializar_banco():
         );
         """))
 
-        # cria admin se não existir
         result = conn.execute(text(
             "SELECT id FROM usuarios WHERE username = 'admin';"
         ))
@@ -55,12 +56,11 @@ def inicializar_banco():
 
             conn.execute(text("""
                 INSERT INTO usuarios (username, senha_hash)
-                VALUES (:username, :senha_hash);
+                VALUES (:username, :senha_hash)
             """), {
                 "username": "admin",
                 "senha_hash": senha_hash
             })
-
 
 inicializar_banco()
 
@@ -78,9 +78,8 @@ def verificar_login(username, senha):
         return bcrypt.checkpw(senha.encode(), result[0].encode())
     return False
 
-
 # =========================
-# EXTRAÇÃO DE TEXTO
+# EXTRAIR TEXTO
 # =========================
 def extrair_texto(arquivo):
     nome = arquivo.name
@@ -112,7 +111,6 @@ def extrair_texto(arquivo):
 
     return ""
 
-
 # =========================
 # SALVAR DOCUMENTO
 # =========================
@@ -126,7 +124,6 @@ def salvar_documento(nome, conteudo, arquivo_bytes):
             "conteudo": conteudo,
             "arquivo": arquivo_bytes
         })
-
 
 # =========================
 # INTERFACE
@@ -154,26 +151,58 @@ else:
     # =========================
     # UPLOAD
     # =========================
-    st.subheader("📤 Upload de Documento")
+    st.subheader("📤 Upload de Documento ou ZIP")
 
     arquivo = st.file_uploader(
-        "Envie um arquivo",
-        type=["pdf", "docx", "xlsx", "txt"]
+        "Envie um arquivo individual ou um .zip",
+        type=["pdf", "docx", "xlsx", "txt", "zip"]
     )
 
     if arquivo:
         with st.spinner("Processando..."):
-            texto = extrair_texto(arquivo)
 
-            if texto.strip():
-                salvar_documento(
-                    arquivo.name,
-                    texto,
-                    arquivo.getvalue()
-                )
-                st.success("Documento salvo com sucesso!")
+            # Caso seja ZIP
+            if arquivo.name.endswith(".zip"):
+
+                with zipfile.ZipFile(io.BytesIO(arquivo.read())) as z:
+
+                    arquivos_processados = 0
+
+                    for nome_arquivo in z.namelist():
+
+                        if nome_arquivo.endswith("/"):
+                            continue
+
+                        with z.open(nome_arquivo) as file:
+
+                            fake_file = io.BytesIO(file.read())
+                            fake_file.name = nome_arquivo
+
+                            texto = extrair_texto(fake_file)
+
+                            if texto.strip():
+                                salvar_documento(
+                                    nome_arquivo,
+                                    texto,
+                                    fake_file.getvalue()
+                                )
+                                arquivos_processados += 1
+
+                st.success(f"{arquivos_processados} arquivos processados com sucesso!")
+
+            # Caso seja arquivo normal
             else:
-                st.warning("Não foi possível extrair texto.")
+                texto = extrair_texto(arquivo)
+
+                if texto.strip():
+                    salvar_documento(
+                        arquivo.name,
+                        texto,
+                        arquivo.getvalue()
+                    )
+                    st.success("Documento salvo com sucesso!")
+                else:
+                    st.warning("Não foi possível extrair texto.")
 
     # =========================
     # BUSCA
@@ -195,7 +224,6 @@ else:
         if resultados:
             for i, (doc_id, nome, arquivo_blob) in enumerate(resultados):
 
-                # Converte memoryview (BYTEA) para bytes
                 arquivo_bytes = bytes(arquivo_blob)
 
                 st.write("📄", nome)
